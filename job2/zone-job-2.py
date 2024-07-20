@@ -9,16 +9,19 @@ import pcb_tools.primitives as pcb_primitive
 import primitives as glif
 import gerber_writer
 
-primitives=[]
+# initialize label writing, which will be done at the end, 
+# after all of the plates have been printed. 
+primitives=[]  # a list of primitives that will be printed by the gerber writer
+g=gerber_writer.gerber_writer("labels.gbr") # print output to labels.gbr
 
-g=gerber_writer.gerber_writer("labels.gbr")
-
+# print header for the print file
 print("""
 %MOMM*%
 %FSLAX36Y36*%
 %LPD*%
 """)
 
+# needed for certain kinds of layouts; disabled now. 
 def rescale(value):
     return value
 
@@ -27,13 +30,27 @@ def rescale(value):
 # classical zone plate 
 #======================
 
-def zoneplate(wavelength, focallength, zones, feature_limit, size_limit, origpen, name, number, center_dot=True):
-    print("%AM{}*".format(name))
-    print("0 {}zone plate zones={} feature_limit={} size_limit={} wavelength={} focallength={} name={} number={}*"
-          .format(("inverse " if origpen==0 else ""), zones, feature_limit, size_limit, wavelength, focallength, name, number))
-    # determine first zone that is viable according to limits
-    pen = origpen
-    for zone in range(zones, 3, -1): 
+def zoneplate(wavelength, focallength, zone_limit, feature_limit, size_limit, 
+              origpen, name, number, center_dot=True):
+    # wavelength: Wavelength of light in mm. 
+    # focallength: offset from zone plate to sensor in mm. 
+    # zone_limit: maximum number of zones allowed. 
+    # feature_limit: smallest feature allowed. 
+    # size_limit: largest size of zone plate allowed (diameter in mm)
+    # origpen: 1 for odd harmonics, 0 for even harmonics. 
+    # name: ascii name of macro to be defined. 
+    # number: number of aperture to assign. 
+    # center_dot: whether to print the center dot or not. 
+
+    # begin a macro 
+    print("%AM{}*".format(name))  
+    # comment on what the macro contains 
+    print("0 {}zone plate zone_limit={} feature_limit={} size_limit={} wavelength={} focallength={} name={} number={}*"
+          .format(("inverse " if origpen==0 else ""), zone_limit, feature_limit, size_limit, wavelength, focallength, name, number))
+
+    # determine outermost zone that is viable according to printing limits
+    pen = origpen  # 1 means writing, 0 means blank
+    for zone in range(zone_limit, 3, -1): 
         radius =math.sqrt(zone*wavelength*focallength 
                        + (zone*zone*wavelength*wavelength/4))
         radius2 =math.sqrt((zone-1)*wavelength*focallength 
@@ -46,6 +63,8 @@ def zoneplate(wavelength, focallength, zones, feature_limit, size_limit, origpen
             smallest_feature=feature
             break
         pen = 1-pen
+
+    # make odd if odd zones shown (origpen==1), even if even zones. 
     if origpen==1: 
         if start%2==0:
             start -= 1
@@ -76,27 +95,47 @@ def zoneplate(wavelength, focallength, zones, feature_limit, size_limit, origpen
     print("%")
 
     print()
+    #### These are debugging printouts that don't affect rendering
     # print("%TAfocal_length,{}*%".format(focallength))
     # print("%TAwavelength,{}*%".format(wavelength))
     # print("%TAmaximum_zone,{}*%".format(start))
     # print("%TAtotal_diameter,{:.6f}*%".format(total_diameter))
     # print("%TAsmallest_feature,{:.6f}*%".format(smallest_feature))
+
+    # define an aperture for the zone plate
+    # (This doesn't print anything.) 
     print("%ADD{}{}*%".format(number, name))
     print()
     return (start, total_diameter, smallest_feature)
 
 #=======================
-# pinhole sieve 
+# pinhole sieve, odd harmonics 
 #=======================
 
-def sieve(wavelength, focallength, zones, feature_limit, size_limit, name, number, center_dot=True, divisor=3):
+def sieve(wavelength, focallength, zone_limit, feature_limit, size_limit, 
+          name, number, center_dot=True, divisor=3):
+    # wavelength: Wavelength of light in mm. 
+    # focallength: offset from zone plate to sensor in mm. 
+    # zone_limit: maximum number of zones allowed. 
+    # feature_limit: smallest feature allowed. 
+    # size_limit: largest size of zone plate allowed (diameter in mm)
+    # name: ascii name of macro to be defined. 
+    # number: number of aperture to assign. 
+    # center_dot: whether to print the center dot or not. 
+    # zone_limit: largest zone number allowed, subject to printer limits
+    # feature_limit: the size of the smallest feature and/or feature separation.
+    # size_limit: a limit upon the diameter of the zone plate. 
+    # divisor: how many diameters to skip between dots: minimum 2. 
+
+    # start a macro 
     print("%AM{}*".format(name))
 
+    # a comment on the contents of the macro 
     print("0 pinhole sieve max_zones={} feature_limit={} size_limit={} wavelength={} focallength={} name={} number={}*"
-          .format(zones, feature_limit, size_limit, wavelength, focallength, name, number))
+          .format(zone_limit, feature_limit, size_limit, wavelength, focallength, name, number))
 
     # determine first zone that is viable according to limits
-    for zone in range(zones, 1, -1): 
+    for zone in range(zone_limit, 1, -1): 
         radius =math.sqrt(zone*wavelength*focallength 
                        + (zone*zone*wavelength*wavelength/4))
         radius2 =math.sqrt((zone-1)*wavelength*focallength 
@@ -143,11 +182,15 @@ def sieve(wavelength, focallength, zones, feature_limit, size_limit, name, numbe
     print("%")
 
     print()
+    ### documentation that doesn't affect printing. 
     # print("%TAfocallength,{}*%".format(focallength))
     # print("%TAwavelength,{}*%".format(wavelength))
     # print("%TAmaximum_zone,{}*%".format(start))
     # print("%TAtotal_diameter,{:.6f}*%".format(total_diameter))
     # print("%TAsmallest_feature,{:.6f}*%".format(smallest_feature))
+
+    # Define an aperture for this zone plate. 
+    # (This does not print anything.) 
     print("%ADD{}{}*%".format(number, name))
     print()
     return (start, total_diameter, smallest_feature)
@@ -156,13 +199,25 @@ def sieve(wavelength, focallength, zones, feature_limit, size_limit, name, numbe
 # inverse sieve, even harmonics
 #===============================
 
-def inverse_sieve(wavelength, focallength, zones, feature_limit, size_limit, name, number):
+def inverse_sieve(wavelength, focallength, zone_limit, feature_limit, size_limit, name, number, divisor=3):
+    # wavelength: Wavelength of light in mm. 
+    # focallength: offset from zone plate to sensor in mm. 
+    # zone_limit: maximum number of zones allowed. 
+    # feature_limit: smallest feature allowed. 
+    # size_limit: largest size of zone plate allowed (diameter in mm)
+    # name: ascii name of macro to be defined. 
+    # number: number of aperture to assign. 
+    # center_dot: whether to print the center dot or not. 
+    # zone_limit: largest zone number allowed, subject to printer limits
+    # feature_limit: the size of the smallest feature and/or feature separation.
+    # size_limit: a limit upon the diameter of the zone plate. 
+    # divisor: how many diameters to skip between dots: minimum 2. 
     print("%AM{}*".format(name))
-    print("0 inverse sieve zones={} feature_limit={} size_limit={} wavelength={} focallength={} name={} number={}*"
-          .format(zones, feature_limit, size_limit, wavelength, focallength, name, number))
+    print("0 inverse sieve zone_limit={} feature_limit={} size_limit={} wavelength={} focallength={} name={} number={}*"
+          .format(zone_limit, feature_limit, size_limit, wavelength, focallength, name, number))
 
     # determine first zone that is viable according to limits
-    for zone in range(zones, 1, -1): 
+    for zone in range(zone_limit, 1, -1): 
         radius =math.sqrt(zone*wavelength*focallength 
                        + (zone*zone*wavelength*wavelength/4))
         radius2 =math.sqrt((zone-1)*wavelength*focallength 
@@ -188,7 +243,7 @@ def inverse_sieve(wavelength, focallength, zones, feature_limit, size_limit, nam
         # want the circles inside a zone, centered, and filling the zone
         diameter = radius1-radius2
         center = (radius2+radius1)/2
-        circles = int(center*2*math.pi / (3*diameter)) 
+        circles = int(center*2*math.pi / (divisor*diameter)) 
         angle_increment = 2*math.pi/circles
         total_area = math.pi*(diameter/2)*(diameter/2)*circles
         print("0 zone {} center={:.6f} diameter={:.6f} circles={} angle increment={:.6f} area={:.6f}*"
@@ -201,11 +256,14 @@ def inverse_sieve(wavelength, focallength, zones, feature_limit, size_limit, nam
     print("%")
 
     print()
+    ### documentation that doesn't affect printing
     # print("%TAfocallength,{}*%".format(focallength))
     # print("%TAwavelength,{}*%".format(wavelength))
     # print("%TAmaximum_zone,{}*%".format(start))
     # print("%TAtotal_diameter,{:.6f}*%".format(total_diameter))
     # print("%TAsmallest_feature,{:.6f}*%".format(smallest_feature))
+
+    # Define an aperture with the current macro and number. 
     print("%ADD{}{}*%".format(number, name))
     print()
     return (start, total_diameter, smallest_feature)
@@ -215,14 +273,25 @@ def inverse_sieve(wavelength, focallength, zones, feature_limit, size_limit, nam
 # probabilistic zone sieve 
 #============================
 
-def prob(wavelength, focallength, zones, diameter_limit, size_limit, name, number, center_dot=True):
+def prob(wavelength, focallength, zone_limit, diameter_limit, size_limit, name, number, center_dot=True):
+    # wavelength: Wavelength of light in mm. 
+    # focallength: offset from zone plate to sensor in mm. 
+    # zone_limit: maximum number of zones allowed. 
+    # feature_limit: smallest feature allowed. 
+    # size_limit: largest size of zone plate allowed (diameter in mm)
+    # name: ascii name of macro to be defined. 
+    # number: number of aperture to assign. 
+    # center_dot: whether to print the center dot or not. 
+    # zone_limit: largest zone number allowed, subject to printer limits
+    # feature_limit: the size of the smallest feature and/or feature separation.
+    # size_limit: a limit upon the diameter of the zone plate. 
     print("%AM{}*".format(name))
 
     print("0 prob max_zones={} diameter_limit={} size_limit={} wavelength={} focallength={} name={} number={}*"
-          .format(zones, diameter_limit, size_limit, wavelength, focallength, name, number))
+          .format(zone_limit, diameter_limit, size_limit, wavelength, focallength, name, number))
 
     # determine first zone that is viable according to limits
-    for zone in range(zones, 1, -1): 
+    for zone in range(zone_limit, 1, -1): 
         radius1 =math.sqrt(zone*wavelength*focallength 
                        + (zone*zone*wavelength*wavelength/4))
         radius2 =math.sqrt((zone-1)*wavelength*focallength 
@@ -239,7 +308,7 @@ def prob(wavelength, focallength, zones, diameter_limit, size_limit, name, numbe
     print("0 outer zone is {} with feature diameter {:.6f} and total diameter {:.6f}*"
           .format(start, diameter, total_diameter))
 
-    # create usage maps for eligible zones
+    # create usage maps for eligible zones to determine collisions. 
     radius1 = {}
     radius2 = {}
     center = {}
@@ -297,12 +366,16 @@ def prob(wavelength, focallength, zones, diameter_limit, size_limit, name, numbe
     print("%")
 
     print()
+    ### documentation that doesn't affect printing
     # print("%TAfocallength,{}*%".format(focallength))
     # print("%TAwavelength,{}*%".format(wavelength))
     # print("%TAmaximum_zone,{}*%".format(start))
     # print("%TAtotal_diameter,{:.6f}*%".format(total_diameter))
     # print("%TAsmallest_diameter,{:.6f}*%".format(smallest_diameter))
+
+    # define an aperture with the current macro and the given number. 
     print("%ADD{}{}*%".format(number, name))
+
     print()
     return (start, total_diameter, smallest_diameter)
 
@@ -322,13 +395,13 @@ divisor = 2 # spacing of circles >= 2
 size_limit=3.0
 feature_limit=0.008
 for f in [22, 25, 32, 38]: 
-    zones=200
+    zone_limit=200
     for center in [True, False]:
         for color in ['red', 'green', 'blue']: 
             wavelength = wavelengths[color]
 
             code = "zp{}-{}-{}".format(f,'pinhole' if center else 'blank', color)
-            (start, total_diameter, smallest_feature) = zoneplate(wavelength, f, zones, 
+            (start, total_diameter, smallest_feature) = zoneplate(wavelength, f, zone_limit, 
                 feature_limit, size_limit, 1, code, serial, center)
             serials[code] = serial
             starts[code] = start
@@ -339,10 +412,8 @@ for f in [22, 25, 32, 38]:
             serial += 1
 
             code = "ps{}-{}-{}".format(f,'pinhole' if center else 'blank',color)
-            (start, total_diameter, smallest_feature) = sieve(wavelength, f, zones, 
+            (start, total_diameter, smallest_feature) = sieve(wavelength, f, zone_limit, 
                 feature_limit, size_limit, code, serial, center, divisor)
-            # (start, total_diameter, smallest_feature) = prob(wavelength, f, zones, 
-            #     feature_limit, size_limit, code, serial, center)
             serials[code] = serial
             starts[code] = start
             smallest[code] = smallest_feature
